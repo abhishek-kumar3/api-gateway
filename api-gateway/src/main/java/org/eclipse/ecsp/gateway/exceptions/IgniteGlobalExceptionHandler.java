@@ -18,10 +18,10 @@
 
 package org.eclipse.ecsp.gateway.exceptions;
 
+import org.eclipse.ecsp.gateway.plugins.spi.GatewayErrorResponseBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.web.WebProperties;
-import org.springframework.boot.web.error.ErrorAttributeOptions;
 import org.springframework.boot.webflux.autoconfigure.error.AbstractErrorWebExceptionHandler;
 import org.springframework.boot.webflux.error.ErrorAttributes;
 import org.springframework.context.ApplicationContext;
@@ -49,7 +49,8 @@ import static org.eclipse.ecsp.gateway.utils.GatewayConstants.REQUEST_NOT_FOUND;
 /**
  * Global exception handler for the Ignite API Gateway.
  *
- * <p>This class extends AbstractErrorWebExceptionHandler to handle exceptions
+ * <p>
+ * This class extends AbstractErrorWebExceptionHandler to handle exceptions
  * that occur during request processing and return appropriate error responses.
  *
  * @author Abhishek Kumar
@@ -60,21 +61,33 @@ public class IgniteGlobalExceptionHandler extends AbstractErrorWebExceptionHandl
 
     private static final Logger LOGGER = LoggerFactory.getLogger(IgniteGlobalExceptionHandler.class);
 
+    private final GatewayErrorResponseBuilder errorResponseBuilder;
+
     /**
      * Constructs an IgniteGlobalExceptionHandler with the specified parameters.
      *
-     * @param errorAttributes    The ErrorAttributes to use for error handling.
-     * @param resources          The WebProperties.Resources to use for resource handling.
-     * @param applicationContext The ApplicationContext to use for context-related operations.
-     * @param configurer         The ServerCodecConfigurer to use for codec configuration.
+     * @param errorAttributes      The ErrorAttributes to use for error handling.
+     * @param resources            The WebProperties.Resources to use for resource
+     *                             handling.
+     * @param applicationContext   The ApplicationContext to use for context-related
+     *                             operations.
+     * @param configurer           The ServerCodecConfigurer to use for codec
+     *                             configuration.
+     * @param errorResponseBuilder The SPI for building error response bodies and
+     *                             determining
+     *                             HTTP status codes. Falls back to the default
+     *                             implementation
+     *                             if no custom bean is registered.
      */
     public IgniteGlobalExceptionHandler(final ErrorAttributes errorAttributes,
-                                        final WebProperties.Resources resources,
-                                        final ApplicationContext applicationContext,
-                                        final ServerCodecConfigurer configurer) {
+            final WebProperties.Resources resources,
+            final ApplicationContext applicationContext,
+            final ServerCodecConfigurer configurer,
+            final GatewayErrorResponseBuilder errorResponseBuilder) {
         super(errorAttributes, resources, applicationContext);
         setMessageReaders(configurer.getReaders());
         setMessageWriters(configurer.getWriters());
+        this.errorResponseBuilder = errorResponseBuilder;
     }
 
     /**
@@ -95,17 +108,13 @@ public class IgniteGlobalExceptionHandler extends AbstractErrorWebExceptionHandl
      * @return A Mono containing the ServerResponse with the error details.
      */
     private Mono<ServerResponse> renderErrorResponse(ServerRequest request) {
-
-        ErrorAttributeOptions options = ErrorAttributeOptions.of(ErrorAttributeOptions.Include.MESSAGE);
-        Map<String, Object> errorPropertiesMap = getErrorAttributes(request, options);
         Throwable throwable = getError(request);
-        errorPropertiesMap.clear();
-        errorPropertiesMap.putAll(prepareResponse(throwable));
-        HttpStatusCode httpStatus = determineHttpStatus(throwable);
-        LOGGER.error("Error occurred while processing request: {}", errorPropertiesMap.get(MESSAGE), throwable);
+        Object responseBody = errorResponseBuilder.build(throwable, request);
+        HttpStatusCode httpStatus = errorResponseBuilder.statusCode(throwable);
+        LOGGER.error("Error occurred while processing request: {}", throwable.getMessage(), throwable);
         return ServerResponse.status(httpStatus)
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(errorPropertiesMap);
+                .bodyValue(responseBody);
     }
 
     /**

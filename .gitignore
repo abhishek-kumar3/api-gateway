@@ -47,3 +47,4 @@ hld
 
 !README.md
 *.md
+!walkthrough.md
